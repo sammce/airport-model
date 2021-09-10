@@ -393,6 +393,7 @@ class AirportModel:
         )
 
         print(df)
+        print()
         print(self._get_max_wait(df))
         pd.DataFrame.to_csv(df, "output.csv")
 
