@@ -1,4 +1,5 @@
 import random
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -71,9 +72,9 @@ boarding_worker_range = (1, 2)
 ###############
 
 # The delay between the arrival of passengers
-passenger_arrival_range = (0, 0)
+passenger_arrival_range = (5, 10)
 # The amount of gates (flights) open at the airport
-gate_amount_range = (1, 1)
+gate_amount_range = (5, 5)
 
 """
 Airport Model:
@@ -108,6 +109,10 @@ Airport Model:
 
         Boarding:
             minutes per ticket - float
+
+        Airport:
+            Amount of gates - int
+            Passenger arrival delay - float
 
     Outputs:
         The time (in minutes) it took for controllable processes to complete.
@@ -278,6 +283,20 @@ class BoardingGate:
             count += 1
             yield passenger
 
+    def _generate_passengers_with_params(self, passenger_amount: int):
+        count = 0
+
+        while count < passenger_amount:
+            passenger = Passenger(
+                suitcases=random.randint(*suitcase_range),
+                hand_luggage=random.randint(*hand_luggage_range),
+                age=random.randint(*age_range),
+                metal_chance=random.randint(*triggers_metal_range),
+                overweight_chance=random.randint(*overweight_suitcase_range),
+            )
+            count += 1
+            yield passenger
+
 
 class AirportModel:
     def __init__(
@@ -289,39 +308,60 @@ class AirportModel:
         self.boarding_gates = np.array([gate for gate in self._generate_gates()])
         self.wait_times = {}
 
-    def _generate_gates(self):
-        for _ in range(random.randint(*gate_amount_range)):
+    def _generate_gates(self, gate_amount: Union[int, None] = None):
+        if not gate_amount:
+            gate_amount = random.randint(*gate_amount_range)
+
+        for _ in range(gate_amount):
             yield BoardingGate(
                 env=self.env,
                 minutes_per_ticket=random.randint(*minutes_per_search_range),
                 worker_count=random.randint(*boarding_worker_range),
             )
 
-    def _generate_facilities(self):
-        return (
-            CheckIn(
-                env=self.env,
+    def _generate_facilities(
+        self,
+        check_in_params: Union[dict, None] = None,
+        security_params: Union[dict, None] = None,
+    ):
+        if not check_in_params:
+            check_in_params = dict(
                 minutes_per_suitcase=random.randint(*minutes_per_suitcase_range),
                 overweight_delay=random.randint(*overweight_delay_range),
                 worker_count=random.randint(*check_in_worker_range),
-            ),
-            Security(
-                env=self.env,
+            )
+
+        if not security_params:
+            security_params = dict(
                 minutes_per_bag=random.randint(*minutes_per_bag_range),
                 minutes_per_search=random.randint(*minutes_per_search_range),
                 random_search_chance=random.randint(*random_search_range),
                 worker_count=random.randint(*security_worker_range),
-            ),
+            )
+        return (
+            CheckIn(env=self.env, **check_in_params),
+            Security(env=self.env, **security_params),
         )
 
-    def run_airport(self):
+    def run_airport(self, passenger_delay: Union[int, None] = None):
+        if not passenger_delay:
+            passenger_delay = random.randint(*passenger_arrival_range)
+
         for gate in self.boarding_gates:
             for passenger in gate.passengers:
-                yield self.env.timeout(random.randint(*passenger_arrival_range))
+                yield self.env.timeout(passenger_delay)
 
                 self.env.process(self.check_in.check_in(passenger))
                 self.env.process(self.security.check_bags(passenger))
                 self.env.process(gate.check_ticket(passenger))
+
+    def _get_max_wait(self, df: pd.DataFrame):
+        column = df["Total Wait Time (Minutes)"]
+        max_value = column.max()
+
+        row = df.loc[column == max_value]
+
+        return max_value, row
 
     def survey_passengers(self):
         for gate in self.boarding_gates:
@@ -353,6 +393,7 @@ class AirportModel:
         )
 
         print(df)
+        print(self._get_max_wait(df))
         pd.DataFrame.to_csv(df, "output.csv")
 
 
