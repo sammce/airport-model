@@ -1,8 +1,14 @@
+# Used for reading user input without newline character
+import getpass
+
 # Used for simulating the randomness of aiport passengers
 import random
 
 # Used for getting CLI arguments
 import sys
+
+# Used for annotating a paramater that is callable
+from typing import Callable
 
 # Mainly for numpy.array in order to improve performance
 import numpy as np
@@ -14,6 +20,9 @@ import pandas as pd
 # A module for simulating scenarios using an event loop system.
 # Documentation can be found at: https://simpy.readthedocs.io/en/latest/
 import simpy
+
+# Used for generating fake names
+from faker import Faker
 
 # My own module for printing coloured text to the terminal
 from samutil.formatting import ColorCodes, Formatter
@@ -137,25 +146,28 @@ Airport Model:
 # Instantiate formatter class
 formatter = Formatter()
 
+# Instantiate faker class
+faker = Faker()
+
 # Set pandas output options
 pd.set_option("display.show_dimensions", False)
 pd.set_option("display.max_columns", 7)
 pd.set_option("display.width", 130)
 
 
-def hyphenate_iterable(args: tuple):
-    return "-".join(convert_all(args))
+def hyphenate_iterable(*args):
+    return " - ".join(convert_all(args, str))
 
 
 def convert_all(args: tuple, data_type: type = str, iter_type: type = tuple):
-    return wrap_all(args, callback=data_type, iter_type=iter_type)
+    return wrap_all(*args, callback=data_type, iter_type=iter_type)
 
 
-def wrap_all(args: tuple, callback, iter_type: type = tuple):
+def wrap_all(args: tuple, callback: Callable, iter_type: type = tuple):
     return iter_type(map(lambda x: callback(x), args))
 
 
-def call_method_on_all(args: tuple, method: str, iter_type: type = tuple):
+def call_method_on_all(args, method: str, iter_type: type = tuple):
     for val in args:
         assert method in dir(
             val
@@ -182,6 +194,7 @@ class Passenger:
         self.age = age
         self.metal_chance = metal_chance
         self.overweight_chance = overweight_chance
+        self.name = faker.name()
 
         self.had_overweight_luggage = False
         self.triggered_metal_detector = False
@@ -216,7 +229,7 @@ class CheckIn:
         self.minutes_per_suitcase = minutes_per_suitcase
         self.overweight_delay = overweight_delay
 
-        self.workers = simpy.Resource(env, random.randint(*worker_count))
+        self.workers = simpy.Resource(env, worker_count)
 
     def check_in(self, passenger: Passenger):
         arrival_time = self.env.now
@@ -251,7 +264,7 @@ class Security:
         self.minutes_per_search = minutes_per_search
         self.random_search_chance = random_search_chance
 
-        self.workers = simpy.Resource(env, random.randint(*worker_count))
+        self.workers = simpy.Resource(env, worker_count)
 
     def _should_randomly_search(self):
         """
@@ -296,7 +309,8 @@ class BoardingGate:
     ):
         self.env = env
         self.minutes_per_ticket = minutes_per_ticket
-        self.workers = simpy.Resource(env, random.randint(*worker_count))
+        self.city = faker.city()
+        self.workers = simpy.Resource(env, worker_count)
         self.passengers = np.array(
             [p for p in self._generate_passengers(passenger_amount)]
         )
@@ -408,9 +422,10 @@ class AirportModel:
 
         for gate in self.boarding_gates:
             gate.passenger_data = np.zeros((len(gate), 7), dtype="object")
+            gate.passenger_names = np.zeros((len(gate)), dtype="object")
 
             for index, passenger in enumerate(gate.passengers):
-
+                gate.passenger_names[index] = passenger.name
                 gate.passenger_data[index] = np.array(
                     [
                         passenger.total_wait_time,
@@ -422,31 +437,50 @@ class AirportModel:
                         passenger.had_overweight_luggage,
                     ]
                 )
-
             gate.passenger_data = pd.DataFrame(
-                data=gate.passenger_data, columns=self.columns
+                data=gate.passenger_data,
+                columns=self.columns,
+                index=[gate.passenger_names],
             )
 
     def _ask(
         self,
         input_message: str = "",
-        convert_to_type: type = str,
+        convert_to_type: type = int,
         instance_of: tuple = [],
         default: tuple = None,
     ):
+        """
+        Read in a user input, which can be a value, range or blank (which indicates default)
+        convert it to a passed type (defaults to 'int')
+        verify that the conversion was successful (using 'instance_of' parameter, which defaults to 'convert_to_type)
+        """
         if not instance_of:
             instance_of = [convert_to_type]
+
+        random_callback = random.randint
+        if convert_to_type == float:
+            random_callback = random.uniform
 
         valid = False
 
         while not valid:
             try:
                 if self.ask_politely:
-                    user_input = input("   • " + input_message + ColorCodes.MAGENTA)
+                    user_input = input("   • " + input_message)
+                    CURSOR_UP_ONE = "\x1b[1A"
+                    ERASE_LINE = "\x1b[2K"
+                    print(
+                        CURSOR_UP_ONE
+                        + ERASE_LINE
+                        + "   • "
+                        + input_message
+                        + ColorCodes.MAGENTA,
+                        end="",
+                    )
+
                 else:
                     user_input = ""
-
-                print(ColorCodes.END, end="")
 
                 # If user doesn't enter a value, or ask_politely is False
                 # use the default ranges set at the top of the file.
@@ -456,13 +490,13 @@ class AirportModel:
                         user_input = (default, default)
                     else:
                         user_input = default
-
                     self.ask_politely and print(
-                        "     Using random value in range: "
-                        + formatter.bold(hyphenate_iterable(user_input))
+                        " " + hyphenate_iterable(user_input) + ColorCodes.END
                     )
 
-                    return user_input
+                    return random_callback(*user_input)
+
+                print(ColorCodes.END, end="")
 
                 # Check if user input is a range
                 if not user_input.isdigit() and "-" in user_input:
@@ -480,7 +514,7 @@ class AirportModel:
                 else:
                     user_input = convert_to_type(user_input)
 
-                return user_input
+                return random_callback(*user_input)
             except ValueError:
                 print(
                     formatter.bold(formatter.error("\n  Invalid Parameter:")),
@@ -499,6 +533,7 @@ class AirportModel:
         Repeatedly ask for values to use as inputs into the model.
 
          Ask for:
+           Maximum acceptable wait time
            Passenger arrival delay
 
            Boarding Gate:
@@ -518,12 +553,14 @@ class AirportModel:
                Chance of a random search taking place
                Amount of workers at the security area
         """
-        print("\t+------------------------+")
-        print("\t|     ", formatter.bold("AirportModel"), "     |")
+        print("    +------------------------+")
+        print("    |     ", formatter.bold("AirportModel"), "     |")
         print(
-            "\t|   " + formatter.success("By:", formatter.bold("Sam McElligott")) + "  |"
+            "    |   "
+            + formatter.success("By:", formatter.bold("Sam McElligott"))
+            + "  |"
         )
-        print("\t+------------------------+\n\n")
+        print("    +------------------------+\n\n")
 
         if self.ask_politely:
             print(formatter.bold(formatter.info("Please enter: (value, range or blank)")))
@@ -544,19 +581,17 @@ class AirportModel:
             "\n  " + formatter.underline(formatter.bold("Boarding Gate"))
         )
         gate_params = dict(
-            gate_amount=self._ask(
-                "Amount of gates open: ", int, default=gate_amount_range
-            ),
+            gate_amount=self._ask("Amount of gates open: ", default=gate_amount_range),
             minutes_per_ticket=self._ask(
                 "Time it takes to examine a ticket: ",
                 float,
                 default=minutes_per_ticket_range,
             ),
             worker_count=self._ask(
-                "Amount of workers on each gate: ", int, default=boarding_worker_range
+                "Amount of workers on each gate: ", default=boarding_worker_range
             ),
             passenger_amount=self._ask(
-                "Amount of passengers for each gate: ", int, default=passenger_range
+                "Amount of passengers for each gate: ", default=passenger_range
             ),
         )
 
@@ -577,7 +612,6 @@ class AirportModel:
             ),
             worker_count=self._ask(
                 "Amount of workers at the check in desk: ",
-                int,
                 default=check_in_worker_range,
             ),
         )
@@ -603,12 +637,8 @@ class AirportModel:
                 default=random_search_range,
             ),
             worker_count=self._ask(
-                "Amount of workers at security: ", int, default=security_worker_range
+                "Amount of workers at security: ", default=security_worker_range
             ),
-        )
-
-        print(
-            security_params.get("worker_count"), type(security_params.get("worker_count"))
         )
 
         return dict(
@@ -625,20 +655,31 @@ class AirportModel:
         """
         for index, gate in enumerate(self.boarding_gates):
             print(
-                formatter.underline(formatter.bold(formatter.info("\nGate", index + 1)))
+                formatter.underline(
+                    formatter.bold(
+                        formatter.info("\nGate", str(index + 1) + ":"), gate.city
+                    )
+                )
             )
 
             min_row, max_row = self._get_wait_minmax(gate.passenger_data)
 
             print(formatter.warning("Longest wait time:\n"), max_row)
-            print(formatter.success("Shortest wait time:\n"), min_row)
+            print(formatter.success("\nShortest wait time:\n"), min_row)
 
-            print(formatter.info("Averages:"))
+            print(formatter.info("\nAverages:"))
             averages = str(gate.passenger_data.mean())
 
             # Print each average prefixed with a tab and 4 backspaces,
             # suffixed with the value's data unit,
             # except for the last value, which is info about the dtype.
+
+            # The reason for using a tab then 4 backspaces is that when "    "
+            # is used, the alignment doesn't line up. Weird
+
+            # The lambda pseudo-code is as follows:
+            #   return a string with 4 prefixed spaces, the value itself, and the value's unit
+            #   set in 'AirportModel.colump_map'
             print(
                 *tuple(
                     map(
@@ -652,8 +693,16 @@ class AirportModel:
                 color = formatter.success
             else:
                 color = formatter.error
-            print("    Median Wait Time: " + (" " * 5) + color(round(median_wait, 2)))
-            print("    Target: " + (" " * 15) + formatter.bold(self.wait_time_threshold))
+            print(
+                "    Median Wait Time: "
+                + (" " * 5)
+                + color(round(median_wait, 2), "minutes")
+            )
+            print(
+                "    Target: "
+                + (" " * 15)
+                + formatter.bold(self.wait_time_threshold, "minutes")
+            )
 
 
 if __name__ == "__main__":
