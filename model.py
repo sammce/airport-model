@@ -143,19 +143,19 @@ pd.set_option("display.max_columns", 7)
 pd.set_option("display.width", 130)
 
 
-def hyphenate_iterable(*args):
-    return " - ".join(args)
+def hyphenate_iterable(args: tuple):
+    return "-".join(convert_all(args))
 
 
-def convert_all(*args: tuple, data_type: type = str, iter_type: type = tuple):
-    return wrap_all(*args, callback=data_type, iter_type=iter_type)
+def convert_all(args: tuple, data_type: type = str, iter_type: type = tuple):
+    return wrap_all(args, callback=data_type, iter_type=iter_type)
 
 
-def wrap_all(*args: tuple, callback: function, iter_type: type = tuple):
+def wrap_all(args: tuple, callback, iter_type: type = tuple):
     return iter_type(map(lambda x: callback(x), args))
 
 
-def call_method_on_all(*args, method: str, iter_type: type = tuple):
+def call_method_on_all(args: tuple, method: str, iter_type: type = tuple):
     for val in args:
         assert method in dir(
             val
@@ -216,7 +216,7 @@ class CheckIn:
         self.minutes_per_suitcase = minutes_per_suitcase
         self.overweight_delay = overweight_delay
 
-        self.workers = simpy.Resource(env, worker_count)
+        self.workers = simpy.Resource(env, random.randint(*worker_count))
 
     def check_in(self, passenger: Passenger):
         arrival_time = self.env.now
@@ -251,7 +251,7 @@ class Security:
         self.minutes_per_search = minutes_per_search
         self.random_search_chance = random_search_chance
 
-        self.workers = simpy.Resource(env, worker_count)
+        self.workers = simpy.Resource(env, random.randint(*worker_count))
 
     def _should_randomly_search(self):
         """
@@ -296,7 +296,7 @@ class BoardingGate:
     ):
         self.env = env
         self.minutes_per_ticket = minutes_per_ticket
-        self.workers = simpy.Resource(env, worker_count)
+        self.workers = simpy.Resource(env, random.randint(*worker_count))
         self.passengers = np.array(
             [p for p in self._generate_passengers(passenger_amount)]
         )
@@ -456,9 +456,10 @@ class AirportModel:
                         user_input = (default, default)
                     else:
                         user_input = default
+
                     self.ask_politely and print(
                         "     Using random value in range: "
-                        + hyphenate_iterable(user_input)
+                        + formatter.bold(hyphenate_iterable(user_input))
                     )
 
                     return user_input
@@ -467,7 +468,7 @@ class AirportModel:
                 if not user_input.isdigit() and "-" in user_input:
 
                     user_input = convert_all(
-                        call_method_on_all(*user_input.split("-"), method="split"),
+                        call_method_on_all(user_input.split("-"), method="split"),
                         data_type=convert_to_type,
                     )
 
@@ -604,6 +605,10 @@ class AirportModel:
             worker_count=self._ask(
                 "Amount of workers at security: ", int, default=security_worker_range
             ),
+        )
+
+        print(
+            security_params.get("worker_count"), type(security_params.get("worker_count"))
         )
 
         return dict(
